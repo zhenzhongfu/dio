@@ -62,18 +62,18 @@ mq = make(int)	// mq
 // mq = make(int, 100)
 // go1
 go func() {
-	for {
-		select {
-		case msg:= <- mq:
-			time.Sleep(time.Minute)
-		}
-	}
+for {
+select {
+case msg:= <- mq:
+time.Sleep(time.Minute)
+}
+}
 }()
 // go2
 go func() {
-	for {
-		mq <- 1
-	}
+for {
+mq <- 1
+}
 }
 ```
 ### 监控
