@@ -1,0 +1,27 @@
+// protoc -I . --go_out=plugins=grpc:. *.proto
+// protoc --go_out=plugins=grpc,import_path=mypackage:. *.proto
+syntax = "proto3";
+
+// package用语句，或者命令行的import_path=mypackage
+package mypack;
+
+enum EnumCode {
+    UNKNOWN = 0;
+    E1 = 4;
+    E2 = 5;
+}
+
+service Login {
+    rpc doLogin(LoginC2S) returns (LoginS2C) {}
+}
+
+message LoginC2S {
+    int64 id = 1;
+    string name = 2;
+    repeated int64 list = 3;
+}
+
+message LoginS2C {
+    int64 code = 1;
+}
+
