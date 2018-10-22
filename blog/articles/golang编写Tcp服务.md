@@ -1,5 +1,5 @@
 ---
-title: golang编写Tcp服务
+title: golang编写Tcp服务(1)
 tags: go,program
 grammar_cjkRuby: true
 ---
@@ -50,7 +50,7 @@ func main() {
 ![steal](http://morsmachine.dk/steal.jpg)
 >当某个P的G队列跑完了，而其他P队列还有G，会尝试进行steal操作，获取其他P的G，保证所有M能够全负荷运行。
 
-但有了goroutine，并不代表就不需要处理共享数据和资源，在Go哲学里，强调的是：
+goroutine相比thread更为轻量，一个Go程序中可以并发成千上万个goroutine的系统调度和资源占用开销会更小。但有了goroutine，并不代表就不需要处理共享数据和资源，在Go哲学里，强调的是：
 >不要通过共享内存来通信，而要通过通信来共享内存。
 
 ### 同步
@@ -76,6 +76,34 @@ go func() {
 	}
 }
 ```
-### 监控
-goroutine在启动后，是没有办法被外部停止的，唯一的方法就是通过channel。
 
+goroutine在启动后，除非自己退出，否则不能被停止的，唯一的方法就是通过channel，当然实现起来也很容易。
+```golang?linenums
+func main() {
+	done := make(chan int, 1)
+	go func() {
+		// do sth.
+		// 通知主进程退出
+		done <- 0
+	}()
+	
+	select {
+	case <- done:
+		// quit
+	}
+}
+```
+以往的thread通信机制，常用的那几种，不管是消息队列，还是共享内存，使用和维护起来还是比较复杂的，尤其是对于锁的争用。
+Go提供了sync包，提供基本同步操作，结合goroutine是比较容易写出一个并发程序的，上面的代码引入sync包之后：
+```golang?linenums
+func main() {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// do sth.
+	}
+
+	wg.Wait()
+}
+```
