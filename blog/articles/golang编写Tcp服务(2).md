@@ -9,6 +9,14 @@ grammar_cjkRuby: true
 我们只需要三类goroutine即能完成一个简单的模型。
 ```golang?linenums
 // model_01.go
+package main   
+import (    
+    "fmt"      
+    "net"      
+    "os"    
+    "os/signal"
+    "syscall"
+)       
 func main() {
 	ln, err := net.Listen("tcp", ":8000")
 	if err != nil {                          
