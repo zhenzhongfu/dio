@@ -8,7 +8,7 @@ grammar_cjkRuby: true
 要完成一个tcp server服务，主要依赖[net](https://golang.org/pkg/net)包。
 我们只需要三类goroutine即能完成一个简单的模型。
 ```golang?linenums
-// model_1.go
+// model_01.go
 func main() {
 	ln, err := net.Listen("tcp", ":8000")
 	if err != nil {                          
