@@ -162,3 +162,30 @@ handler done.
 All done.
 ```
 “recv quit signal”，"handler done."，“All done.”依次输出。主协程在收到退出信号时，调用cancel()向context的quit channel发送消息，group有多少个成员，发送多少quit消息，quit消息的类型是struct{}。每个handler协程都从quit channel中获取1个quit消息，然后走退出流程。
+
+将handler处理分离成函数。
+```golang?linenums
+// model_02.go
+...
+func main() {
+...
+	group.Go(func() error {   
+		return handler(newCtx)
+	})       
+...
+
+func hanlder(ctx context.Context) error {
+    for {                                
+        select {                         
+        case <-ctx.Done():               
+            fmt.Println("handler done.") 
+            return nil                   
+        default:                         
+            // recv and send from conn.  
+            time.Sleep(time.Second * 1)  
+            fmt.Println(conn)            
+        }                                
+    }                                    
+    return nil   
+}     
+```
