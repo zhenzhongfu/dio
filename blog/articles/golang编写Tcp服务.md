@@ -60,7 +60,7 @@ channel在使用上类似mq，channel可以指定容量，当某个channel上被
 mq chan int
 mq = make(int)	// mq
 // mq = make(int, 100)
-// go1
+// goroutine1
 go func() {
 	for {
 		select {
@@ -69,7 +69,7 @@ go func() {
 		}
 	}
 }()
-// go2
+// goroutine2
 go func() {
 	for {
 		mq <- 1
@@ -78,3 +78,4 @@ go func() {
 ```
 ### 监控
 goroutine在启动后，是没有办法被外部停止的，唯一的方法就是通过channel。
+
