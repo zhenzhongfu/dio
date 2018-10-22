@@ -161,4 +161,4 @@ $ go run model_02.go
 handler done.
 All done.
 ```
-可以看到“recv quit signal”，"handler done."，“All done.”依次输出。
+可以看到“recv quit signal”，"handler done."，“All done.”依次输出。主协程在收到退出信号时，调用cancel()向context的quit channel发送消息，group有多少个成员，发送多少quit消息，quit消息的类型是struct{}。每个handler协程都从quit channel中获取1个quit消息，然后走退出流程。
