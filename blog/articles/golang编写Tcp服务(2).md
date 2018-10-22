@@ -94,7 +94,8 @@ func main() {
             group.Go(func() error {                        
                 for {                                      
                     select {                               
-                    case <-newCtx.Done():                  
+                    case <-newCtx.Done():   
+						fmt.Println("handler done.")
                         return nil                         
                     default:                               
                         // recv and send from conn.        
@@ -126,5 +127,6 @@ func main() {
     fmt.Println("All done.")                               
 }                                                          
 ```
-
-
+相比model_01，
+- 主协程多了三个动作，1）创建context并将handler加入到WaitGroup中；2）quit时执行cancel；3）wait所有的handler执行完毕。
+- Handler协程多了一个动作，等待context的cancel消息。
