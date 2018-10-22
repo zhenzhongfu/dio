@@ -94,16 +94,6 @@ func main() {
 }
 ```
 以往的thread通信机制，常用的那几种，不管是消息队列，还是共享内存，使用和维护起来还是比较复杂的，尤其是对于锁的争用。
-Go提供了sync包，提供基本同步操作，结合goroutine是比较容易写出一个并发程序的，上面的代码引入sync包之后：
-```golang?linenums
-func main() {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// do sth.
-	}
+Go提供了sync包，提供基本同步操作，结合goroutine是比较容易写出一个并发程序的。
 
-	wg.Wait()
-}
-```
+
