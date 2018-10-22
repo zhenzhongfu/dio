@@ -97,7 +97,8 @@ func main() {
                     case <-newCtx.Done():   
 						fmt.Println("handler done.")
                         return nil                         
-                    default:                               
+                    default:               
+						time.Sleep(time.Second)
                         // recv and send from conn.        
                         fmt.Println(conn)                  
                     }                                      
@@ -130,3 +131,34 @@ func main() {
 相比model_01，
 - 主协程多了三个动作，1）创建context并将handler加入到WaitGroup中；2）quit时执行cancel；3）wait所有的handler执行完毕。
 - Handler协程多了一个动作，等待context的cancel消息。
+测试一下connect的情况。
+```golang?linenums
+// client.go
+package main
+import (
+    "fmt"
+    "net"
+    "time"
+)
+func main() {
+    conn, err := net.Dial("tcp", ":8000")
+    if err != nil {
+        fmt.Println(err)
+    }
+    fmt.Println(conn)
+    time.Sleep(time.Second * 10)
+}
+```
+分别run model_02.go和client.go，然后kill model_02。
+```shell
+$ go run model_02.go 
+&{{0xc0000b2080}}
+&{{0xc0000b2080}}
+&{{0xc0000b2080}}
+&{{0xc0000b2080}}
+^Crecv quit signal
+&{{0xc0000b2080}}
+handler done.
+All done.
+```
+可以看到“recv quit signal”，"handler done."，“All done.”依次输出。
