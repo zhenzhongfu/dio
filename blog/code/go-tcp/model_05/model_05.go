@@ -1,9 +1,10 @@
-//model_03
+//model_05
 package main
 
 import (
 	"context"
 	"fmt"
+	"go-tcp/model_05/network"
 	"net"
 	"os"
 	"os/signal"
@@ -28,7 +29,6 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	group, newCtx := errgroup.WithContext(ctx)
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -36,9 +36,8 @@ func main() {
 				fmt.Println(err)
 				continue
 			}
-			group.Go(func() error {
-				return handler(newCtx, conn)
-			})
+
+			handler(ctx, conn)
 		}
 	}()
 
@@ -56,35 +55,25 @@ func main() {
 		}
 	}
 
-	if err := group.Wait(); err != nil {
-		fmt.Println(err)
-	}
 	fmt.Println("All done.")
 }
 
-func handler(ctx context.Context, conn net.Conn) error {
-	for {
-		buf := make([]byte, 100)
-		select {
-		case <-ctx.Done():
-			fmt.Println("handler done.")
-			return nil
-		default:
-			// recv and send from conn.
-			n, err := conn.(*net.TCPConn).Read(buf)
-			if err != nil {
-				fmt.Println(err)
-				return err
-			}
+var queue = make(chan []byte, 100)
 
-			fmt.Printf("recv(%d) %s\n", n, buf)
-			buf = buf[:n]
-			n, err = conn.(*net.TCPConn).Write(buf)
-			if err != nil {
-				fmt.Println(err)
-			}
-			fmt.Printf("send(%d) %s\n", n, buf)
-		}
+func handler(topCtx context.Context, conn net.Conn) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	group, newCtx := errgroup.WithContext(ctx)
+
+	c := network.NewNetConn(conn, 100)
+	group.Go(func() error {
+		return c.ReadRoutine(topCtx, newCtx, cancel)
+	})
+
+	group.Go(func() error {
+		return c.SendRoutine(topCtx, newCtx, cancel)
+	})
+	if err := group.Wait(); err != nil {
+		fmt.Println(err)
 	}
 	return nil
 }

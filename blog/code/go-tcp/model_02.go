@@ -30,18 +30,7 @@ func main() {
 				continue
 			}
 			group.Go(func() error {
-				for {
-					select {
-					case <-newCtx.Done():
-						fmt.Println("handler done.")
-						return nil
-					default:
-						// recv and send from conn.
-						time.Sleep(time.Second * 1)
-						fmt.Println(conn)
-					}
-				}
-				return nil
+				return handler(newCtx, conn)
 			})
 		}
 	}()
@@ -64,4 +53,19 @@ func main() {
 		fmt.Println(err)
 	}
 	fmt.Println("All done.")
+}
+
+func handler(ctx context.Context, conn net.Conn) error {
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("handler done.")
+			return nil
+		default:
+			// recv and send from conn.
+			time.Sleep(time.Second * 1)
+			fmt.Println(conn)
+		}
+	}
+	return nil
 }
