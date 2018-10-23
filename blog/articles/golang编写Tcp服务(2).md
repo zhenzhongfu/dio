@@ -1,5 +1,5 @@
 ---
-title: golang编写Tcp服务(2)
+title: golang编写Tcp服务(2)建立模型
 tags: go,program
 grammar_cjkRuby: true
 ---
