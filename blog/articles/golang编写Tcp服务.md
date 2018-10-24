@@ -105,15 +105,19 @@ if !ok {
 	// channel已被关闭
 }
 ```
->+ 若不得已由消费者关闭，则生产者必须使用recover捕获异常。
+>+ 若不得已由消费者关闭，则生产者必须使用recover捕获异常。但使用额外的channel或者WaitGroup处理会更好。
 ```golang
 // 生产者
-defer func() {
-	if err := recover(); err != nil {
-	}
-}()
+func SafeSend() error {
+	defer func() {
+		if err := recover(); err != nil {
+			// do sth.
+		}
+	}()
+	...
+}
 ```
->+ 若有必要，可以在使用select操作channel时考虑倒计时机制保持系统可用。
+>+ 若有必要，可以在使用select操作channel时考虑倒计时机制，以保持系统一定程度可用。
 ```golang
 func Send(ch chan<- []byte, msg []byte) error{
 	select {
