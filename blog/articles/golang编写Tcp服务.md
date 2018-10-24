@@ -6,8 +6,8 @@ grammar_cjkRuby: true
 
 Go是一门表达力强，简洁，干净，有效的编程语言，它特有的并发机制使得其能够更为容易的编写充分利用多核机器性能的程序。用Go写一个高并发的server与基于I/O多路复用模型的server，在思路和处理细节上有诸多不同。本篇文章通过编写一个完整可用的例子，来描述如何使用Go编写tcp server。
 
-## 概念
-### 多路复用模型
+# 概念
+## 多路复用模型
 在Linux上基于I/O多路复用模型的server，大体是这样的
 ```c
 int main() {
@@ -25,7 +25,7 @@ int main() {
 ```
 本质上是事件循环，系统在对应端口上捕获到的事件，均会被放入事件列表，程序编写者需要循环处理这份列表，根据具体的事件进行相应的回调处理。其中epoll_wait可传入时间参数以设定其在等待事件的空窗时间。整个模型循环在一个os进程中，若要利用多核性能，就必须加入多进程和多线程的处理，通常这部分会比较复杂。一些通用的做法是，判断若是读事件，使用main thread去recv数据，raw数据丢到mq，多个worker thread从mq上读取raw数据进行解析并处理。但凡涉及到多进程多线程，就不可避免地需要考虑共享资源的使用，也就不可避免地使用到锁。锁是特别会增加程序员心智负担的一个东西，稍不注意就造成系统锁死，bad guy。所以写过C再写Erlang和Go的时候就会很开心。另外，thread的监控也会比较头疼，若worker thread异常退出，该如何处理？若要通知其他worker thread退出，也很麻烦。
 
-### Go模型
+## Go模型
 使用Go时，server模型大体是这样的：
 ```golang?linenums
 func main() {
@@ -53,7 +53,77 @@ func main() {
 goroutine相比thread更为轻量，一个Go程序中可以并发成千上万个goroutine的系统调度和资源占用开销会更小。但有了goroutine，并不代表就不需要处理共享数据和资源，在Go哲学里，强调的是：
 >不要通过共享内存来通信，而要通过通信来共享内存。
 
-### 同步
+理论上来说，我们只需要三类goroutine即能完成一个简单的模型。
+
+- 主协程：完成Listen，等待退出信号，然后向所有加入WaitGroup的goroutine发送退出消息。
+- Accept协程：完成Accept动作。
+- Handler协程：处理socket连接上的读写事件。
+但在实际应用中，由于网络IO的存在，仅仅handler协程是无法同时处理socket连接上读写的，所以还必须再多两个协程分别将读写IO分离出去。
+- Read协程：从socket读取数据，解析，处理。
+- Send协程：将准备好的数据发送到socket。
+- Handler协程的职责改为，创建Recv和Send协程，将他们放入WaitGroup作为整体管理，同生共死。
+
+```golang?linenums
+func main() {
+	ln, err := net.Listen("tcp", ":8000")
+	if err != nil {                      
+		fmt.Println(err)                 
+		return                           
+	}    
+	
+	ctx, cancel := context.WithCancel(context.Background())
+	// Accept协程
+	go func() {                                            
+		for {                                              
+			conn, err := ln.Accept()                       
+			if err != nil {                                
+				fmt.Println(err)                           
+				continue                                   
+			}                                              
+
+			handler(ctx, conn)                             
+		}                                                  
+	}()  
+	
+	quit := make(chan os.Signal, 1)        
+	signal.Notify(quit,                    
+		syscall.SIGINT,                    
+		syscall.SIGTERM,                   
+		syscall.SIGQUIT,                   
+	)                                      
+	select {                               
+	case <-quit:                           
+		{                                  
+			fmt.Println("recv quit signal")
+			cancel()                       
+		}                                  
+	}                                      
+}
+
+func handler(topCtx context.Context, conn net.Conn) error {
+    ctx, cancel := context.WithCancel(context.Background())
+    group, newCtx := errgroup.WithContext(ctx)             
+                 
+	// read协程
+    group.Go(func() error {                                
+        return readRoutine(topCtx, newCtx, cancel, conn)   
+    })                                                     
+        
+	// send协程
+    group.Go(func() error {                                
+        return sendRoutine(topCtx, newCtx, cancel, conn)   
+    })                                                     
+    if err := group.Wait(); err != nil {                   
+        fmt.Println(err)                                   
+    }                                                      
+    return nil                                             
+}                                                          
+```
+
+## 同步
+要完成一个tcp server服务，主要依赖[net](https://golang.org/pkg/net)，[errgroup](https://godoc.org/golang.org/x/sync/errgroup)，[context](https://golang.org/pkg/context)，[sync](https://golang.org/pkg/sync/)包。除net包外，其余都与同步有关。
+
+### **channel**
 channel作为Go的同步机制，通过传递数据结构的引用来完成goroutine之间的通信，传递的是数据的所有权，无需上锁。
 channel在使用上类似mq，channel可以指定容量，当某个channel上被未读数据占满时，向其写入的goroutine会被阻塞。相反，channel为空时，读取的goroutine也会被阻塞。以下代码，容量为0的channel与阻塞操作无异。
 ```golang?linenums
@@ -94,9 +164,8 @@ func main() {
 }
 ```
 以往的thread通信机制，常用的那几种，不管是消息队列，还是共享内存，使用和维护起来还是比较复杂的，尤其是对于锁的争用。
-Go提供了sync包，提供基本同步操作，结合goroutine还是比较容易写出一个并发程序的。
 
-### channel tips
+### **channel tips**
 >+ 在使用channel时，尽量由生产者一方关闭channel，消费者判断channel是否被关闭。
 ```golang
 // 消费者
@@ -140,20 +209,12 @@ func SendTimout(ch chan<- []byte, msg []byte) error{
 }
 ```
 
-要完成一个tcp server服务，主要依赖[net](https://golang.org/pkg/net)，[errgroup](https://godoc.org/golang.org/x/sync/errgroup)，[context](https://golang.org/pkg/context)，[sync](https://golang.org/pkg/sync/)包。
-理论上来说，我们只需要三类goroutine即能完成一个简单的模型。
-
-- 主协程：完成Listen，等待退出信号，然后向所有加入WaitGroup的goroutine发送退出消息。
-- Accept协程：完成Accept动作。
-- Handler协程：处理socket连接上的读写事件。
-但在实际应用中，由于网络IO的存在，仅仅handler协程是无法同时处理socket连接上读写的，所以还必须再多两个协程分别将读写IO分离出去。
-- Recv协程：从socket读取数据，解析，处理。
-- Send协程：将准备好的数据发送到socket。
-- Handler协程的职责改为，创建Recv和Send协程，将他们放入WaitGroup作为整体管理，同生共死。
+### **group tips**
 
 
 
-本节讲解一下读写分离。
+
+
 
 仅靠Handler协程是无法完成在socket上同时处理读写的。[net](https://golang.org/pkg/net/)包的网络IO操作，比如Dial，Read，Write均为block，虽然可以使用类似SetReadDeadline这类接口设置block的超时时间，但是在没有IO请求的时候，调用接口的协程处于挂起状态，不能提供服务。
 来看一个例子：
