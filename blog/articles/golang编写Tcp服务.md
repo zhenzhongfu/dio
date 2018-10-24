@@ -107,13 +107,24 @@ if !ok {
 ```
 >+ 若不得已由消费者关闭，则生产者必须使用recover捕获异常。但使用额外的channel或者WaitGroup处理会更好。
 ```golang
-// 生产者
+// 生产者1
 func SafeSend() error {
 	defer func() {
 		if err := recover(); err != nil {
 			// do sth.
 		}
 	}()
+	...
+}
+
+// 生产者2
+func SafeSend2(ctx context.Context, cancel context.CancelFunc) error {
+	defer func() {
+		cancel()
+	}
+	for {
+		select {
+			case <-ctx.Done():
 	...
 }
 ```
