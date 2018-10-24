@@ -96,6 +96,36 @@ func main() {
 以往的thread通信机制，常用的那几种，不管是消息队列，还是共享内存，使用和维护起来还是比较复杂的，尤其是对于锁的争用。
 Go提供了sync包，提供基本同步操作，结合goroutine还是比较容易写出一个并发程序的。
 
+>channel使用tips
+>+ 在使用时，尽量由生产者一方关闭channel，消费者判断channel是否被关闭。
+```golang
+// 消费者
+msg, ok := <-channel
+if !ok {
+	// channel已被关闭
+}
+```
+>+ 若不得已由消费者关闭，则生产者必须使用recover捕获异常。
+```golang
+// 生产者
+defer func() {
+	if err := recover(); err != nil {
+	}
+}()
+```
+>+ 若有必要，可以在使用select操作channel时考虑倒计时机制保持系统可用。
+```golang
+func Send(ch chan<- []byte, msg []byte) error{
+	select {
+	case ch <- msg:
+		// do sth.
+	case <-time.After(time.Second):
+		// timeout
+	}
+}
+```
+>+ 
+
 ---
 title: golang编写Tcp服务(2)建立模型
 tags: go,program
