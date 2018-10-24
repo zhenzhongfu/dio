@@ -124,7 +124,7 @@ func Send(ch chan<- []byte, msg []byte) error{
 	case ch <- msg:
 		// do sth.
 	case <-time.After(time.Second):
-		// timeout
+		// timeout and check sth.
 	}
 }
 ```
