@@ -96,8 +96,8 @@ func main() {
 以往的thread通信机制，常用的那几种，不管是消息队列，还是共享内存，使用和维护起来还是比较复杂的，尤其是对于锁的争用。
 Go提供了sync包，提供基本同步操作，结合goroutine还是比较容易写出一个并发程序的。
 
->channel使用tips
->+ 在使用时，尽量由生产者一方关闭channel，消费者判断channel是否被关闭。
+### channel tips
+>+ 在使用channel时，尽量由生产者一方关闭channel，消费者判断channel是否被关闭。
 ```golang
 // 消费者
 msg, ok := <-channel
@@ -105,7 +105,7 @@ if !ok {
 	// channel已被关闭
 }
 ```
->+ 若不得已由消费者关闭，则生产者必须使用recover捕获异常。但使用额外的channel或者WaitGroup处理会更好。
+>+ 若不得已由消费者关闭channel，则生产者必须使用recover捕获异常。但使用额外的channel或者WaitGroup处理是更好的选择。
 ```golang
 // 生产者1
 func SafeSend() error {
@@ -128,216 +128,30 @@ func SafeSend2(ctx context.Context, cancel context.CancelFunc) error {
 	...
 }
 ```
->+ 若有必要，可以在使用select操作channel时考虑倒计时机制，以保持系统一定程度可用。
+>+ 若有必要，考虑使用select超时机制，以保持系统一定程度可用。
 ```golang
-func Send(ch chan<- []byte, msg []byte) error{
+func SendTimout(ch chan<- []byte, msg []byte) error{
 	select {
-	case ch <- msg:
+	case ch <- msg:	// 假如ch容量已满，开始阻塞
 		// do sth.
 	case <-time.After(time.Second):
-		// timeout and check sth.
+		// timeout then do sth.
 	}
 }
 ```
->+ 
 
----
-title: golang编写Tcp服务(2)建立模型
-tags: go,program
-grammar_cjkRuby: true
----
+要完成一个tcp server服务，主要依赖[net](https://golang.org/pkg/net)，[errgroup](https://godoc.org/golang.org/x/sync/errgroup)，[context](https://golang.org/pkg/context)，[sync](https://golang.org/pkg/sync/)包。
+理论上来说，我们只需要三类goroutine即能完成一个简单的模型。
 
-## 
-要完成一个tcp server服务，主要依赖[net](https://golang.org/pkg/net)包。
-我们只需要三类goroutine即能完成一个简单的模型。
-```golang?linenums
-// model_01.go
-package main   
-import (    
-    "fmt"      
-    "net"      
-    "os"    
-    "os/signal"
-    "syscall"
-)       
-func main() {
-	ln, err := net.Listen("tcp", ":8000")
-	if err != nil {                          
-		fmt.Println(err)                     
-		return                               
-	}   
-	go func() {                     
-    	for {                       
-			conn, err := ln.Accept()
-			if err != nil {         
-				fmt.Println(err)    
-				continue            
-			}                       
-			go func() {
-				// recv and send from conn.
-				fmt.Println(conn)
-			}()
-		}                           
-	}()  
-	
-	quit := make(chan os.Signal, 1)        
-	signal.Notify(quit,                    
-		syscall.SIGINT,                    
-		syscall.SIGTERM,                   
-		syscall.SIGQUIT,                   
-	)                                      
-	select {
-	case <-quit:
-		{
-			fmt.Println("recv quit signal")
-		}
-	}   
-}
-```
-- 主协程：完成Listen，等待退出信号。
+- 主协程：完成Listen，等待退出信号，然后向所有加入WaitGroup的goroutine发送退出消息。
 - Accept协程：完成Accept动作。
-- Handler协程：处理连接conn上的读写事件。
+- Handler协程：处理socket连接上的读写事件。
+但在实际应用中，由于网络IO的存在，仅仅handler协程是无法同时处理socket连接上读写的，所以还必须再多两个协程分别将读写IO分离出去。
+- Recv协程：从socket读取数据，解析，处理。
+- Send协程：将准备好的数据发送到socket。
+- Handler协程的职责改为，创建Recv和Send协程，将他们放入WaitGroup作为整体管理，同生共死。
 
-启动。
-```golang?linenums
-$ go run main.go &
-$ netstat -anp|grep 8000
-tcp      0      0 :::8000    :::*       LISTEN      37512/main 
-```
-kill进程，主协程退出，但不会通知和等待其他协程，程序终止。但在实际应用中，handler go经常会需要做一些收尾工作，比如回收资源以及通知其他服务，此时，我们需要借助sync包来完成。
-```golang?linenums
-// model_02.go
-package main
-import (
-    "context"
-    "fmt"
-    "net"
-    "os"
-    "os/signal"
-    "syscall"
 
-    "golang.org/x/sync/errgroup"
-)
-func main() {                                              
-    ln, err := net.Listen("tcp", ":8000")                  
-    if err != nil {                                        
-        fmt.Println(err)                                   
-        return                                             
-    }                                                      
-                                                           
-    ctx, cancel := context.WithCancel(context.Background())
-    group, newCtx := errgroup.WithContext(ctx)             
-    go func() {                                            
-        for {                                              
-            conn, err := ln.Accept()                       
-            if err != nil {                                
-                fmt.Println(err)                           
-                continue                                   
-            }                                              
-            group.Go(func() error {                        
-                for {                                      
-                    select {                               
-                    case <-newCtx.Done():   
-						fmt.Println("handler done.")
-                        return nil                         
-                    default:               
-						time.Sleep(time.Second)
-                        // recv and send from conn.        
-                        fmt.Println(conn)                  
-                    }                                      
-                }                                          
-                return nil                                 
-            })                                             
-        }                                                  
-    }()                                                    
-                                                           
-    quit := make(chan os.Signal, 1)                        
-    signal.Notify(quit,                                    
-        syscall.SIGINT,                                    
-        syscall.SIGTERM,                                   
-        syscall.SIGQUIT,                                   
-    )                                                      
-    select {                                               
-    case <-quit:                                           
-        {                                                  
-            fmt.Println("recv quit signal")                
-            cancel()                                       
-        }                                                  
-    }                                                      
-                                                           
-    if err := group.Wait(); err != nil {                   
-        fmt.Println(err)                                   
-    }                                                      
-    fmt.Println("All done.")                               
-}                                                          
-```
-相比model_01，
-- 主协程多了三个动作，1）创建context并将handler加入到WaitGroup中；2）quit时执行cancel；3）wait所有的handler执行完毕。
-- Handler协程多了一个动作，等待context的cancel消息。
-测试一下connect的情况。
-```golang?linenums
-// client.go
-package main
-import (
-    "fmt"
-    "net"
-    "time"
-)
-func main() {
-    conn, err := net.Dial("tcp", ":8000")
-    if err != nil {
-        fmt.Println(err)
-    }
-    fmt.Println(conn)
-    time.Sleep(time.Second * 10)
-}
-```
-分别run model_02.go和client.go，然后kill model_02。
-```shell
-$ go run model_02.go 
-&{{0xc0000b2080}}
-&{{0xc0000b2080}}
-&{{0xc0000b2080}}
-&{{0xc0000b2080}}
-^Crecv quit signal
-&{{0xc0000b2080}}
-handler done.
-All done.
-```
-“recv quit signal”，"handler done."，“All done.”依次输出。主协程在收到退出信号时，调用cancel()向context的quit channel发送消息，group有多少个成员，发送多少quit消息，quit消息的类型是struct{}。每个handler协程都从quit channel中获取1个quit消息，然后走退出流程。
-
-将handler处理分离成函数。
-```golang?linenums
-// model_02.go
-...
-func main() {
-...
-	group.Go(func() error {   
-		return handler(newCtx)
-	})       
-...
-
-func hanlder(ctx context.Context) error {
-    for {                                
-        select {                         
-        case <-ctx.Done():               
-            fmt.Println("handler done.") 
-            return nil                   
-        default:                         
-            // recv and send from conn.  
-            time.Sleep(time.Second * 1)  
-            fmt.Println(conn)            
-        }                                
-    }                                    
-    return nil   
-}     
-```
-
----
-title: golang编写Tcp服务(3)读写分离
-tags: go,program
-grammar_cjkRuby: true
----
 
 本节讲解一下读写分离。
 
