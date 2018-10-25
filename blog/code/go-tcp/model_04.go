@@ -28,6 +28,7 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	group, newCtx := errgroup.WithContext(ctx)
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -36,7 +37,9 @@ func main() {
 				continue
 			}
 
-			handler(ctx, conn)
+			group.Go(func() error {
+				return handler(newCtx, conn)
+			})
 		}
 	}()
 
@@ -54,6 +57,7 @@ func main() {
 		}
 	}
 
+	group.Wait()
 	fmt.Println("All done.")
 }
 
