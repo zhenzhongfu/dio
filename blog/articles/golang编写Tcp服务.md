@@ -249,7 +249,11 @@ cancel的调用本质是向(*context.Context).Done塞入一条struct{}消息，�
 ## 网络
 net.Listen会被动打开一个端口，当有连接访问，会先被放入到listen backlog队列，执行一次Accept操作会从backlog队列中取出一个连接。backlog的size被设定成SOMAXCONN，可通过sysctl -a|grep somaxconn查看，SOMAXCONN在ubuntu中是128。
 ![backlog](./images/1540379029103.png)
-在实际使用中，除非Accept操作太慢，
+在实际使用中，除非Accept操作太慢，否则是不需要干预这个值的，若有需要，在/etc/sysctl.conf中添加net.core.somaxconn=xxx就好。
+
+Go net包的网络相关接口都是blocking的，不过底层依然epoll+Non-blocking，整个核心实现基本都在源码/usr/local/go/src/runtime/netpoll.go里，wait socket io的同时将G挂起，直到io ready后G在重新被放入队列等待调度。
+
+
 
 
 
