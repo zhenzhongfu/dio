@@ -248,6 +248,7 @@ cancel的调用本质是向(*context.Context).Done塞入一条struct{}消息，�
 
 ## 网络
 net.Listen会被动打开一个端口，当有连接访问，会先被放入到listen backlog队列，执行一次Accept操作会从backlog队列中取出一个连接。backlog的size被设定成SOMAXCONN，可通过sysctl -a|grep somaxconn查看，SOMAXCONN在ubuntu中是128。
+
 ![backlog](./images/1540379029103.png)
 在实际使用中，除非Accept操作太慢，否则不需要干预。
 
