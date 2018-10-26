@@ -278,7 +278,7 @@ sizebuf := make([]byte, 4)
 // 用io.ReadFull获取确切长度的数据
 n, err := io.ReadFull(conn, sizebuf) 
 if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-	// 超时流程
+	// do timeout
 }
 ```
 
