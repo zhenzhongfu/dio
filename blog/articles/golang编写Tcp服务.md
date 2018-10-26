@@ -270,7 +270,8 @@ type message struct {
 ```
 复杂的格式可以是IDL(Interface description language)，例如[json](https://www.json.org/)，[protobuf](https://developers.google.com/protocol-buffers/)等。
 
-在处理流式数据时多考虑两个问题：1）未满时等待；2）溢出时缓存。
+### 读
+在读流式数据时多考虑两个问题：1）未满时等待；2）溢出时缓存。
 ```golang?linenums
 // 设置io超时时间
 conn.SetReadDeadline(time.Now().Add(timeout))   
@@ -280,47 +281,57 @@ n, err := io.ReadFull(conn, sizebuf)
 if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 	// do timeout
 }
+if err != nil {
+	// err
+}
 ```
+
+>+ socket无数据。io.ReadFull阻塞，对应的goroutine会被挂起，timeout后超时。
+>+ socket部分数据到达。io.ReadFull阻塞，对应的goroutine会被挂起，timeout后超时。
+>+ socket数据少于预期大小。io.ReadFull返回错误。
+>+ socket关闭。io.ReadFull返回io.EOF。
+
+![io.ReadFull](./images/1540538414423.png)
+
 io.ReadFull通过获取确切长度的字节，在使用层面简洁的处理了粘包，不用再从获取的数据上再做切割和拼接。以往用C语言实现的方案，单次获取到的字节数量不一定是一个完整的数据包，还必须放入缓存中，与后续到达的字节序列拼接在一起，再判断是否拿到了完整的包，若不是则继续等待，若是则调整缓存。
+
+### 写
+写流式数据，考虑有没有写完。
+```golang?linenums
+func writeAll(conn net.Conn, b []byte, try int) error {       
+    if try >= 3 {                                             
+        return fmt.Errorf("writeAll try more than 3 times!!!")
+    }                                                         
+                                                             
+    n, err := conn.Write(b)                                   
+    if err != nil {                                           
+        fmt.Printf("writeAll err :%s\n", err)                 
+        return err                                            
+    }                                                         
+                                                             
+    if n != len(b) {                                          
+        size := len(b)                                        
+        copy(b, b[n:])                                        
+        b = b[:(size - n)]                                    
+        return writeAll(conn, b, try+1)                       
+    }                                                                                           
+    return nil                                                
+}    
+```
+write操作，首先写入操作系统的网络缓冲，操作系统会给每条tcp连接都保留读写缓冲区。
+>+ 写完所有数据。n==len(b)。
+>+ 写完部分数据。n<len(b)，这个时候应该再次尝试写操作，直到所有数据都成功写入。
+>+ 阻塞。缓冲区满，Write操作会被阻塞。
+写操作的判断较为简单，只需要考虑返回值n和err，做相应的处理。
 
 ### **pool tips**
 [sync.Pool](https://golang.org/pkg/sync/#Pool)是一组可以单独保存和检索的临时对象，同一个Pool对于多个goroutine来说是安全的。
 sync.Pool的设计目标是cache已分配但未使用且能在之后被重用的对象用于缓解gc的压力。
-```golang?linenums
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		// The Pool's New function should generally only return pointer
-		// types, since a pointer can be put into the return interface
-		// value without an allocation:
-		return new(bytes.Buffer)
-	},
-}
-
-// timeNow is a fake version of time.Now for tests.
-func timeNow() time.Time {
-	return time.Unix(1136214245, 0)
-}
-
-func Log(w io.Writer, key, val string) {
-	b := bufPool.Get().(*bytes.Buffer)
-	b.Reset()
-	// Replace this with time.Now() in a real logger.
-	b.WriteString(timeNow().UTC().Format(time.RFC3339))
-	b.WriteByte(' ')
-	b.WriteString(key)
-	b.WriteByte('=')
-	b.WriteString(val)
-	w.Write(b.Bytes())
-	bufPool.Put(b)
-}
-
-func main() {
-	Log(os.Stdout, "path", "/search?q=flowers")
-}
-```
+sync.Pool的一个合理用法是管理一组临时对象，这些临时对象在并发的goroutine之间静默共享并可被重用，如fmt package，它维护一个动态大小的临时输出缓冲区存储，其占用的存储空间在活跃时变大，不活跃时变小。
 >在tcp server哪些可以使用sync.Pool实现？
 >+ 连接对象。accept成功，从Pool获取对象，连接关闭，将对象Put回去。
 >+ 消息对象。从Pool获取对象，填充并处理消息，处理完便Put回去。
+
 
 
 
