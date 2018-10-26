@@ -281,8 +281,46 @@ if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 	// do timeout
 }
 ```
+io.ReadFull通过获取确切长度的字节，在使用层面简洁的处理了粘包，不用再从获取的数据上再做切割和拼接。以往用C语言实现的方案，单次获取到的字节数量不一定是一个完整的数据包，还必须放入缓存中，与后续到达的字节序列拼接在一起，再判断是否拿到了完整的包，若不是则继续等待，若是则调整缓存。
 
+### **pool tips**
+[sync.Pool](https://golang.org/pkg/sync/#Pool)是一组可以单独保存和检索的临时对象，同一个Pool对于多个goroutine来说是安全的。
+sync.Pool的设计目标是cache已分配但未使用且能在之后被重用的对象用于缓解gc的压力。
+```golang?linenums
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		// The Pool's New function should generally only return pointer
+		// types, since a pointer can be put into the return interface
+		// value without an allocation:
+		return new(bytes.Buffer)
+	},
+}
 
+// timeNow is a fake version of time.Now for tests.
+func timeNow() time.Time {
+	return time.Unix(1136214245, 0)
+}
+
+func Log(w io.Writer, key, val string) {
+	b := bufPool.Get().(*bytes.Buffer)
+	b.Reset()
+	// Replace this with time.Now() in a real logger.
+	b.WriteString(timeNow().UTC().Format(time.RFC3339))
+	b.WriteByte(' ')
+	b.WriteString(key)
+	b.WriteByte('=')
+	b.WriteString(val)
+	w.Write(b.Bytes())
+	bufPool.Put(b)
+}
+
+func main() {
+	Log(os.Stdout, "path", "/search?q=flowers")
+}
+```
+>在tcp server哪些可以使用sync.Pool实现？
+>+ 连接对象。accept成功，从Pool获取对象，连接关闭，将对象Put回去。
+>+ 消息对象。从Pool获取对象，填充并处理消息，处理完便Put回去。
 
 
 
