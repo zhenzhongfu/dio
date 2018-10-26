@@ -268,7 +268,7 @@ type message struct {
 	content string	// 内容
 }
 ```
-复杂的格式可以是[json](https://www.json.org/)，[protobuf](https://developers.google.com/protocol-buffers/)
+复杂的格式可以是IDL(Interface description language)，例如[json](https://www.json.org/)，[protobuf](https://developers.google.com/protocol-buffers/)等。
 
 在处理流式数据时多考虑两个问题：1）未满时等待；2）溢出时缓存。
 ```golang?linenums
