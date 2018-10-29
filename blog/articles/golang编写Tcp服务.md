@@ -248,14 +248,90 @@ cancel的调用本质是向(*context.Context).Done塞入一条struct{}消息，�
 
 ## 网络
 net.Listen会被动打开一个端口，当有连接访问，会先被放入到listen backlog队列，执行一次Accept操作会从backlog队列中取出一个连接。backlog的size被设定成SOMAXCONN，可通过sysctl -a|grep somaxconn查看，SOMAXCONN在ubuntu中是128。
+
 ![backlog](./images/1540379029103.png)
-在实际使用中，除非Accept操作太慢，否则是不需要干预这个值的，若有需要，在/etc/sysctl.conf中添加net.core.somaxconn=xxx就好。
+在实际使用中，除非Accept操作太慢，否则不需要干预。
 
 Go net包的网络相关接口都是blocking的，不过底层依然epoll+Non-blocking，整个核心实现基本都在源码/usr/local/go/src/runtime/netpoll.go里，wait socket io的同时将G挂起，直到io ready后G在重新被放入队列等待调度。
 
+>突破资源的限制
+>+ ulimit命令提供对shell和进程的可用资源的限制。可以在/etc/profile，~/.bash_profile 设置ulimit。
+>+ limits.conf提供对用户会话的可用资源限制。位置/etc/security/limits.conf。
+>+ 设置sysctl.conf提高Linux的性能。位置/etc/sysctl.conf，详细设置可以参考其他人的模板，更详细的可以查看[linux手册](https://github.com/torvalds/linux/tree/master/Documentation/sysctl)。
 
+socket上的数据均为stream，即字节序列，如同水管中的水一样没有明确的边界，没有可见的包或者分组，无法准确的预测是否在一个特定的读操作会返回多少字节，所以必须在获得数据后对字节序列进行拆包，封包，然后提交给应用逻辑处理。
 
+对流式数据处理，就类似于用固定的容器从水管中接水，接满一杯就如同获取一个完整的逻辑数据包。制定数据交换格式，就如同给水杯定大小定容量。
+简单的格式可以是这样：
+```golang
+type message struct {
+	size int		// content的大小
+	content string	// 内容
+}
+```
+复杂的格式可以是IDL(Interface description language)，例如[json](https://www.json.org/)，[protobuf](https://developers.google.com/protocol-buffers/)等。
 
+### 读
+在读流式数据时多考虑两个问题：1）未满时等待；2）溢出时缓存。
+```golang?linenums
+// 设置io超时时间
+conn.SetReadDeadline(time.Now().Add(timeout))   
+sizebuf := make([]byte, 4)
+// 用io.ReadFull获取确切长度的数据
+n, err := io.ReadFull(conn, sizebuf) 
+if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+	// do timeout
+}
+if err != nil {
+	// err
+}
+```
+
+>+ socket无数据。io.ReadFull阻塞，对应的goroutine会被挂起，timeout后超时。
+>+ socket部分数据到达。io.ReadFull阻塞，对应的goroutine会被挂起，timeout后超时。
+>+ socket数据少于预期大小。io.ReadFull返回错误。
+>+ socket关闭。io.ReadFull返回io.EOF。
+
+![io.ReadFull](./images/1540538414423.png)
+
+io.ReadFull通过获取确切长度的字节，在使用层面简洁的处理了粘包，不用再从获取的数据上再做切割和拼接。以往用C语言实现的方案，单次获取到的字节数量不一定是一个完整的数据包，还必须放入缓存中，与后续到达的字节序列拼接在一起，再判断是否拿到了完整的包，若不是则继续等待，若是则调整缓存。
+
+### 写
+写流式数据，考虑有没有写完。
+```golang?linenums
+func writeAll(conn net.Conn, b []byte, try int) error {       
+    if try >= 3 {                                             
+        return fmt.Errorf("writeAll try more than 3 times!!!")
+    }                                                         
+                                                             
+    n, err := conn.Write(b)                                   
+    if err != nil {                                           
+        fmt.Printf("writeAll err :%s\n", err)                 
+        return err                                            
+    }                                                         
+                                                             
+    if n != len(b) {                                          
+        size := len(b)                                        
+        copy(b, b[n:])                                        
+        b = b[:(size - n)]                                    
+        return writeAll(conn, b, try+1)                       
+    }                                                                                           
+    return nil                                                
+}    
+```
+write操作，首先写入操作系统的网络缓冲，操作系统会给每条tcp连接都保留读写缓冲区。
+>+ 写完所有数据。n==len(b)。
+>+ 写完部分数据。n<len(b)，这个时候应该再次尝试写操作，直到所有数据都成功写入。
+>+ 阻塞。缓冲区满，Write操作会被阻塞。
+写操作的判断较为简单，只需要考虑返回值n和err，做相应的处理。
+
+### **pool tips**
+[sync.Pool](https://golang.org/pkg/sync/#Pool)是一组可以单独保存和检索的临时对象，同一个Pool对于多个goroutine来说是安全的。
+sync.Pool的设计目标是cache已分配但未使用且能在之后被重用的对象用于缓解gc的压力。
+sync.Pool的一个合理用法是管理一组临时对象，这些临时对象在并发的goroutine之间静默共享并可被重用，如fmt package，它维护一个动态大小的临时输出缓冲区存储，其占用的存储空间在活跃时变大，不活跃时变小。
+>在tcp server哪些可以使用sync.Pool实现？
+>+ 连接对象。accept成功，从Pool获取对象，连接关闭，将对象Put回去。
+>+ 消息对象。从Pool获取对象，填充并处理消息，处理完便Put回去。
 
 
 
